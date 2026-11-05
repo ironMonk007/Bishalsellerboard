@@ -244,11 +244,14 @@ function renderAllSellerAnnualGMV() {
     </div>`).join('');
   if (allSellerGMVChart) allSellerGMVChart.destroy();
   allSellerGMVChart = new Chart(document.getElementById('allSellerGMVChart').getContext('2d'), {
-    type:'bar',
+    type:'line',
     data:{
       labels:totals.map(total => [String(total.year), total.coverage + (total.partial ? ' (partial)' : '')]),
       datasets:[{label:'Total GMV — all available sellers ($)', data:totals.map(total => total.gmv),
-        backgroundColor:totals.map((total,index) => colors[index % colors.length]), borderRadius:6, maxBarThickness:120}]
+        borderColor:'#818cf8', borderWidth:3, backgroundColor:'rgba(99,102,241,.08)',
+        pointBackgroundColor:totals.map((total,index) => colors[index % colors.length]),
+        pointBorderColor:'#e4e6f0', pointBorderWidth:2, pointRadius:6, pointHoverRadius:8,
+        fill:false, tension:0}]
     },
     options:{
       responsive:true, maintainAspectRatio:false,
