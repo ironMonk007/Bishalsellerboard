@@ -74,6 +74,18 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
 .cy-table .sel-row{background:rgba(99,102,241,.08)}
 
 .footer{text-align:center;padding:20px;color:var(--muted);font-size:12px;border-top:1px solid var(--border)}
+
+.portfolio-gmv{margin-bottom:24px}
+.portfolio-gmv h2{font-size:16px;font-weight:700;margin-bottom:8px}
+.portfolio-gmv .portfolio-note{font-size:13px;line-height:1.6;color:var(--muted);margin-bottom:20px;max-width:1000px}
+.portfolio-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:20px}
+.portfolio-total{background:var(--card2);border:1px solid var(--border);border-top:3px solid var(--year-color);border-radius:10px;padding:16px;min-width:0}
+.portfolio-total h3{color:var(--text);font-size:14px;margin-bottom:8px}
+.portfolio-total .portfolio-amount{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;margin-bottom:8px;overflow-wrap:anywhere}
+.portfolio-total .portfolio-coverage{font-size:12px;color:var(--muted);line-height:1.7}
+.portfolio-partial{display:inline-block;margin-left:8px;padding:2px 6px;border-radius:4px;background:rgba(245,158,11,.12);color:var(--orange);font-size:11px;font-weight:600}
+.portfolio-gmv .portfolio-chart-wrap{position:relative;height:340px;min-width:0}
+@media(max-width:650px){.portfolio-summary{grid-template-columns:1fr}.portfolio-gmv .portfolio-chart-wrap{height:300px}.portfolio-total .portfolio-amount{font-size:22px}}
 </style>
 </head>
 <body>
@@ -97,6 +109,13 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
 </div>
 
 <div class="main">
+  <section class="chart-card portfolio-gmv" aria-labelledby="portfolioGMVTitle">
+    <h2 id="portfolioGMVTitle">All Sellers — Total GMV by Year</h2>
+    <p class="portfolio-note" id="portfolioGMVNote">Totals use all available seller/month records for each year. Seller coverage and available months differ; missing records are excluded, not treated as zero. Partial-year totals are not a like-for-like full-year comparison. This chart is independent of the seller, year and month filters above.</p>
+    <div class="portfolio-summary" id="portfolioGMVSummary"></div>
+    <div class="portfolio-chart-wrap"><canvas id="allSellerGMVChart" role="img" aria-labelledby="portfolioGMVTitle" aria-describedby="portfolioGMVNote portfolioGMVSummary">Yearly all-seller GMV totals are shown in the summary above.</canvas></div>
+  </section>
+
   <div class="kpi-row" id="kpiRow"></div>
 
   <div class="chart-card mom-full">
@@ -143,6 +162,7 @@ let currentYear = null;
 let currentMonth = null;
 
 let momChart, cyChart, gmvChart, ordersChart;
+let allSellerGMVChart;
 
 function init() {
   const sellerSel = document.getElementById('sellerSel');
@@ -175,6 +195,79 @@ function init() {
   currentYear = years[0];
   populateYears();
   render();
+  renderAllSellerAnnualGMV();
+}
+
+// Portfolio totals deliberately include every available seller/month record,
+// independently of the selected seller. Sum integer cents to avoid rounding drift.
+function getAllSellerAnnualGMV() {
+  const totals = new Map();
+  Object.entries(DATA).forEach(([code, seller]) => {
+    Object.entries(seller.years).forEach(([year, rows]) => {
+      if (!rows.length) return;
+      const key = Number(year);
+      if (!totals.has(key)) {
+        totals.set(key, {year:key, cents:0, sellers:new Set(), months:new Set(), records:0});
+      }
+      const total = totals.get(key);
+      total.sellers.add(code);
+      rows.forEach(row => {
+        total.cents += Math.round(row.gmv * 100);
+        total.months.add(row.month);
+        total.records += 1;
+      });
+    });
+  });
+  return [...totals.values()].sort((a,b) => a.year - b.year).map(total => {
+    const months = [...total.months].sort((a,b) => a-b);
+    const consecutive = months.every((month, index) => index === 0 || month === months[index-1] + 1);
+    const coverage = consecutive && months.length > 1
+      ? `${MONTHS[months[0]-1]}–${MONTHS[months[months.length-1]-1]}`
+      : months.map(month => MONTHS[month-1]).join(', ');
+    return {year:total.year, gmv:total.cents/100, sellerCount:total.sellers.size,
+      records:total.records, months, coverage, partial:months.length < 12};
+  });
+}
+
+function formatPortfolioGMV(value) {
+  return '$' + value.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function renderAllSellerAnnualGMV() {
+  const totals = getAllSellerAnnualGMV();
+  const colors = ['#6366f1','#22c55e','#f59e0b','#a855f7'];
+  document.getElementById('portfolioGMVSummary').innerHTML = totals.map((total,index) => `
+    <div class="portfolio-total" style="--year-color:${colors[index % colors.length]}">
+      <h3>${total.year}${total.partial ? '<span class="portfolio-partial">Partial year</span>' : ''}</h3>
+      <div class="portfolio-amount">${formatPortfolioGMV(total.gmv)}</div>
+      <div class="portfolio-coverage">${total.coverage} · ${total.months.length} available months<br>${total.sellerCount} sellers · ${total.records} seller-month records</div>
+    </div>`).join('');
+  if (allSellerGMVChart) allSellerGMVChart.destroy();
+  allSellerGMVChart = new Chart(document.getElementById('allSellerGMVChart').getContext('2d'), {
+    type:'bar',
+    data:{
+      labels:totals.map(total => [String(total.year), total.coverage + (total.partial ? ' (partial)' : '')]),
+      datasets:[{label:'Total GMV — all available sellers ($)', data:totals.map(total => total.gmv),
+        backgroundColor:totals.map((total,index) => colors[index % colors.length]), borderRadius:6, maxBarThickness:120}]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{
+          title:items => { const total = totals[items[0].dataIndex]; return `${total.year} · ${total.coverage}${total.partial ? ' · Partial year' : ''}`; },
+          label:context => 'Total GMV: ' + formatPortfolioGMV(context.parsed.y),
+          footer:items => { const total = totals[items[0].dataIndex]; return `${total.sellerCount} sellers · ${total.records} available seller-month records`; }
+        }}
+      },
+      scales:{
+        x:{ticks:{color:'#8b8fa3',font:{size:12},maxRotation:0,minRotation:0},grid:{display:false}},
+        y:{beginAtZero:true,title:{display:true,text:'Total GMV ($)',color:'#8b8fa3'},
+          ticks:{color:'#8b8fa3',callback:value => value >= 1000000 ? '$'+(value/1000000).toFixed(1)+'M' : (value >= 1000 ? '$'+(value/1000).toFixed(0)+'K' : '$'+value)},
+          grid:{color:'rgba(42,46,63,.5)'}}
+      }
+    }
+  });
 }
 
 function populateYears() {
