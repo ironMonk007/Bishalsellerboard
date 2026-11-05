@@ -86,6 +86,32 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
 .portfolio-partial{display:inline-block;margin-left:8px;padding:2px 6px;border-radius:4px;background:rgba(245,158,11,.12);color:var(--orange);font-size:11px;font-weight:600}
 .portfolio-gmv .portfolio-chart-wrap{position:relative;height:340px;min-width:0}
 @media(max-width:650px){.portfolio-summary{grid-template-columns:1fr}.portfolio-gmv .portfolio-chart-wrap{height:300px}.portfolio-total .portfolio-amount{font-size:22px}}
+
+.seller-insights{margin-top:24px;padding-top:24px;border-top:1px solid var(--border)}
+.seller-insights h3{color:var(--text);font-size:15px;margin-bottom:10px}
+.seller-insights .insight-method{font-size:12px;line-height:1.7;color:var(--muted);margin-bottom:16px}
+.seller-insights .insight-headline{background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;line-height:1.7}
+.seller-rank-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-bottom:24px}
+.seller-rank-list{list-style:none;display:flex;flex-direction:column;gap:10px}
+.seller-rank-entry{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:14px;min-width:0}
+.seller-rank-top{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:8px;align-items:start}
+.seller-rank-number{font-size:12px;color:var(--muted);line-height:1.6}
+.seller-jump{background:none;border:0;color:var(--text);font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer;line-height:1.5;overflow-wrap:anywhere}
+.seller-jump:hover{text-decoration:underline;color:var(--accent2)}
+.seller-jump:focus-visible{outline:2px solid var(--accent2);outline-offset:4px;border-radius:3px}
+.seller-rank-change{text-align:right;font-size:14px;font-weight:700;white-space:nowrap}
+.seller-rank-change small{display:block;font-size:12px;font-weight:400;margin-top:4px}
+.seller-rank-detail{font-size:11px;color:var(--muted);line-height:1.8;margin-top:10px;padding-top:8px;border-top:1px solid var(--border)}
+.seller-insights .gain{color:var(--green)}
+.seller-insights .loss{color:var(--red)}
+.seller-focus-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.seller-focus-card{padding:16px;background:var(--card2);border:1px solid var(--border);border-radius:9px;min-width:0}
+.seller-focus-card h4{font-size:14px;line-height:1.5;margin-bottom:12px}
+.seller-focus-card ul{padding-left:18px;display:flex;flex-direction:column;gap:10px;font-size:12px;color:var(--muted);line-height:1.7}
+.seller-focus-card li strong{color:var(--text);font-weight:600}
+.seller-insights .insight-coverage{font-size:12px;line-height:1.8;color:var(--muted);margin-top:18px}
+@media(max-width:900px){.seller-rank-grid,.seller-focus-list{grid-template-columns:1fr}}
+@media(max-width:500px){.seller-rank-top{grid-template-columns:20px minmax(0,1fr)}.seller-rank-change{grid-column:2;text-align:left;margin-top:4px}}
 </style>
 </head>
 <body>
@@ -115,6 +141,19 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
     <div class="portfolio-summary" id="portfolioGMVSummary"></div>
     <p class="portfolio-note" id="portfolioProjectionNote"></p>
     <div class="portfolio-chart-wrap"><canvas id="allSellerGMVChart" role="img" aria-labelledby="portfolioGMVTitle" aria-describedby="portfolioGMVNote portfolioGMVSummary">Three year lines compare monthly all-seller GMV. The forecast method and totals are described above.</canvas></div>
+    <div class="seller-insights" id="sellerYearInsights" aria-labelledby="sellerInsightsTitle">
+      <h2 id="sellerInsightsTitle">Seller Focus — 2026 vs 2025</h2>
+      <p class="insight-method">Ranked by monetary GMV change using actual January–October records, matching the same months per seller. Projections never enter these rankings. Percentage change uses matched 2025 GMV as the baseline. Click a seller name to inspect its existing dashboard.</p>
+      <div class="insight-headline" id="sellerInsightHeadline"></div>
+      <div class="seller-rank-grid">
+        <div><h3>Top 5 GMV drops — focus first</h3><ol class="seller-rank-list" id="sellerTopDrops" aria-label="Top five sellers by monetary GMV loss"></ol></div>
+        <div><h3>Top 5 GMV gains — protect growth</h3><ol class="seller-rank-list" id="sellerTopGains" aria-label="Top five sellers by monetary GMV gain"></ol></div>
+      </div>
+      <h3>Focus sellers: observed issues and what to check</h3>
+      <p class="insight-method">These are diagnostic signals, not proven causes. Stock, traffic, conversion, campaign spend and cancellation/return reasons are not available in the monthly data; verify them in Seller Center before acting. Net/gross order share and NMV/GMV are aggregate ratios, not cancellation or return rates.</p>
+      <div class="seller-focus-list" id="sellerFocusIssues"></div>
+      <div class="insight-coverage" id="sellerInsightCoverage"></div>
+    </div>
   </section>
 
   <div class="kpi-row" id="kpiRow"></div>
@@ -197,6 +236,7 @@ function init() {
   populateYears();
   render();
   renderAllSellerMonthlyGMV();
+  renderSellerYearInsights();
 }
 
 // Aggregate actual seller records by explicit month; missing months stay null.
@@ -306,6 +346,125 @@ function renderAllSellerMonthlyGMV() {
       }
     }
   });
+}
+
+// Compare only paired actual month records, never forecast chart values.
+function getSellerYearComparison() {
+  const year=2026, priorYear=2025, cutoff=10;
+  const rows=[], excluded=[];
+  Object.entries(DATA).forEach(([code,seller]) => {
+    const priorMonths=new Map((seller.years[String(priorYear)] || []).filter(row=>row.month<=cutoff).map(row=>[row.month,row]));
+    const currentMonths=new Map((seller.years[String(year)] || []).filter(row=>row.month<=cutoff).map(row=>[row.month,row]));
+    const months=[...currentMonths.keys()].filter(month=>priorMonths.has(month)).sort((a,b)=>a-b);
+    if (!months.length) {
+      excluded.push({code,name:seller.name,priorMonths:[...priorMonths.keys()].sort((a,b)=>a-b),currentMonths:[...currentMonths.keys()].sort((a,b)=>a-b)});
+      return;
+    }
+    function sumRecords(source) {
+      const sum={gmvCents:0,nmvCents:0,orders:0,netOrders:0};
+      months.forEach(month=>{
+        const row=source.get(month);
+        sum.gmvCents+=Math.round(row.gmv*100);
+        sum.nmvCents+=Math.round(row.nmv*100);
+        sum.orders+=row.orders;
+        sum.netOrders+=row.netOrders;
+      });
+      return {...sum,gmv:sum.gmvCents/100,nmv:sum.nmvCents/100};
+    }
+    const prior=sumRecords(priorMonths), current=sumRecords(currentMonths);
+    const deltaCents=current.gmvCents-prior.gmvCents;
+    const monthlyGaps=months.map(month=>({month,deltaCents:Math.round(currentMonths.get(month).gmv*100)-Math.round(priorMonths.get(month).gmv*100)})).sort((a,b)=>a.deltaCents-b.deltaCents || a.month-b.month);
+    rows.push({code,name:seller.name,months,prior,current,deltaCents,delta:deltaCents/100,
+      percent:prior.gmvCents ? deltaCents/prior.gmvCents*100 : null,
+      netOrderPercent:prior.netOrders ? (current.netOrders-prior.netOrders)/prior.netOrders*100 : null,
+      priorOrderShare:prior.orders ? prior.netOrders/prior.orders*100 : null,
+      currentOrderShare:current.orders ? current.netOrders/current.orders*100 : null,
+      priorNMVShare:prior.gmvCents ? prior.nmvCents/prior.gmvCents*100 : null,
+      currentNMVShare:current.gmvCents ? current.nmvCents/current.gmvCents*100 : null,
+      priorOrderValue:prior.orders ? prior.gmv/prior.orders : null,
+      currentOrderValue:current.orders ? current.gmv/current.orders : null,
+      largestGap:monthlyGaps[0]});
+  });
+  const drops=rows.filter(row=>row.deltaCents<0).sort((a,b)=>a.deltaCents-b.deltaCents || a.code.localeCompare(b.code)).slice(0,5);
+  const gains=rows.filter(row=>row.deltaCents>0).sort((a,b)=>b.deltaCents-a.deltaCents || a.code.localeCompare(b.code)).slice(0,5);
+  const priorCents=rows.reduce((sum,row)=>sum+row.prior.gmvCents,0);
+  const currentCents=rows.reduce((sum,row)=>sum+row.current.gmvCents,0);
+  return {year,priorYear,cutoff,rows,drops,gains,excluded,priorGMV:priorCents/100,currentGMV:currentCents/100,
+    delta:(currentCents-priorCents)/100,percent:priorCents ? (currentCents-priorCents)/priorCents*100 : null,
+    pairCount:rows.reduce((sum,row)=>sum+row.months.length,0)};
+}
+
+function escapeSellerHTML(value) {
+  return String(value).replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+}
+function sellerSignedMoney(value) {
+  return (value<0 ? '−' : value>0 ? '+' : '')+formatPortfolioGMV(Math.abs(value));
+}
+function sellerSignedPercent(value) {
+  return value===null ? 'N/A (zero prior GMV)' : (value<0 ? '−' : value>0 ? '+' : '')+Math.abs(value).toFixed(1)+'%';
+}
+function sellerMonthCoverage(months) {
+  return months.length===10 ? 'Jan–Oct · 10/10 matched months' : `${months.length}/10 matched months: ${months.map(month=>MONTHS[month-1]).join(', ')}`;
+}
+
+function getSellerFocusIssues(row) {
+  const issues=[];
+  const netDirection=row.netOrderPercent===null ? 'cannot be compared from a zero prior baseline' : `${row.netOrderPercent<0 ? 'down' : 'up'} ${Math.abs(row.netOrderPercent).toFixed(1)}%`;
+  issues.push({kind:'volume',text:`GMV fell ${formatPortfolioGMV(Math.abs(row.delta))} (${Math.abs(row.percent || 0).toFixed(1)}%); net orders are ${netDirection} (${row.prior.netOrders.toLocaleString('en-US')} → ${row.current.netOrders.toLocaleString('en-US')}).`,
+    action:'Check top-SKU availability, listing visibility, traffic and conversion to locate the source of lost order volume.'});
+  issues.push({kind:'monthly',text:`Largest matched monthly shortfall: ${MONTH_FULL[row.largestGap.month-1]}, ${formatPortfolioGMV(Math.abs(row.largestGap.deltaCents/100))} below 2025.`,
+    action:'Inspect that month’s SKU-level sales, campaign participation, prices and stock history; the aggregate data does not identify the cause.'});
+  const valueChange=row.priorOrderValue && row.currentOrderValue!==null ? (row.currentOrderValue-row.priorOrderValue)/row.priorOrderValue*100 : null;
+  if (valueChange!==null && valueChange<=-5) {
+    issues.push({kind:'orderValue',text:`GMV per gross order fell ${Math.abs(valueChange).toFixed(1)}% (${formatPortfolioGMV(row.priorOrderValue)} → ${formatPortfolioGMV(row.currentOrderValue)}). This is GMV/gross orders, not the source AOV metric.`,
+      action:'Review product mix, discounts and missing higher-value SKUs; do not assume a price drop without SKU-level evidence.'});
+  }
+  if (row.priorOrderShare!==null && row.currentOrderShare!==null && row.priorNMVShare!==null && row.currentNMVShare!==null) {
+    const orderChange=row.currentOrderShare-row.priorOrderShare;
+    const nmvChange=row.currentNMVShare-row.priorNMVShare;
+    issues.push({kind:'ratios',text:`Net/gross order share: ${row.priorOrderShare.toFixed(1)}% → ${row.currentOrderShare.toFixed(1)}%; NMV/GMV: ${row.priorNMVShare.toFixed(1)}% → ${row.currentNMVShare.toFixed(1)}%.`,
+      action:orderChange<=-2 || nmvChange<=-2
+        ? 'At least one share weakened by 2+ percentage points. Check order-status and cancellation/return reasons; these shares do not prove cancellation or return rates.'
+        : 'Neither share weakened by 2+ percentage points. Prioritize the observed GMV/order-volume gap; inspect order-status details before attributing it to cancellations or returns.'});
+  }
+  return issues;
+}
+
+function renderSellerYearInsights() {
+  const comparison=getSellerYearComparison();
+  const headline=document.getElementById('sellerInsightHeadline');
+  const changeClass=comparison.delta<0 ? 'loss' : 'gain';
+  headline.innerHTML=`Matched seller GMV: ${formatPortfolioGMV(comparison.priorGMV)} (2025) → ${formatPortfolioGMV(comparison.currentGMV)} (2026), <strong class="${changeClass}">${sellerSignedMoney(comparison.delta)} (${sellerSignedPercent(comparison.percent)})</strong><br>${comparison.rows.length} comparable sellers · ${comparison.pairCount} matched seller-month pairs. This matched cohort differs from the all-available totals in the line chart.`;
+  function renderRankings(id,rows,isDrop) {
+    document.getElementById(id).innerHTML=rows.length ? rows.map((row,index)=>`
+      <li class="seller-rank-entry" data-code="${escapeSellerHTML(row.code)}">
+        <div class="seller-rank-top"><span class="seller-rank-number">${index+1}.</span>
+          <button type="button" class="seller-jump" data-seller-code="${escapeSellerHTML(row.code)}">${escapeSellerHTML(row.name)}</button>
+          <span class="seller-rank-change ${isDrop ? 'loss':'gain'}">${sellerSignedMoney(row.delta)}<small>${sellerSignedPercent(row.percent)}</small></span>
+        </div>
+        <div class="seller-rank-detail">2025 GMV ${formatPortfolioGMV(row.prior.gmv)} → 2026 GMV ${formatPortfolioGMV(row.current.gmv)}<br>${escapeSellerHTML(sellerMonthCoverage(row.months))} · Net orders ${row.prior.netOrders.toLocaleString('en-US')} → ${row.current.netOrders.toLocaleString('en-US')}${row.prior.gmv<1000 ? '<br>Small prior GMV baseline: percentage change may be volatile.' : ''}</div>
+      </li>`).join('') : '<li class="seller-rank-entry">No qualifying sellers with this direction of change.</li>';
+  }
+  renderRankings('sellerTopDrops',comparison.drops,true);
+  renderRankings('sellerTopGains',comparison.gains,false);
+  document.getElementById('sellerFocusIssues').innerHTML=comparison.drops.map((row,index)=>`
+    <article class="seller-focus-card" data-code="${escapeSellerHTML(row.code)}">
+      <h4><button type="button" class="seller-jump" data-seller-code="${escapeSellerHTML(row.code)}">${index+1}. ${escapeSellerHTML(row.name)}</button></h4>
+      <ul>${getSellerFocusIssues(row).map(issue=>`<li><strong>Observed:</strong> ${escapeSellerHTML(issue.text)} <strong>Check:</strong> ${escapeSellerHTML(issue.action)}</li>`).join('')}</ul>
+    </article>`).join('');
+  const partial=comparison.rows.filter(row=>row.months.length<comparison.cutoff);
+  document.getElementById('sellerInsightCoverage').textContent=
+    `Coverage notes: ${comparison.excluded.length ? comparison.excluded.map(row=>row.name).join('; ')+' excluded because no paired 2025/2026 actual months are available. ' : 'Every seller has paired actual months. '}`+
+    (partial.length ? 'Partial matched periods: '+partial.map(row=>`${row.name} (${row.months.length}/10: ${row.months.map(month=>MONTHS[month-1]).join(', ')})`).join('; ')+'. ' : '')+
+    'Missing records are never treated as zero. Rankings show monetary impact, not margin/profit or a proven seller health score. For gaining sellers, verify profitable SKU/campaign drivers and protect availability before scaling.';
+  document.getElementById('sellerYearInsights').onclick=event=>{
+    const button=event.target.closest('button[data-seller-code]');
+    if (!button) return;
+    const select=document.getElementById('sellerSel');
+    select.value=button.dataset.sellerCode;
+    select.dispatchEvent(new Event('change',{bubbles:true}));
+    document.getElementById('kpiRow').scrollIntoView({behavior:'smooth',block:'start'});
+  };
 }
 
 function populateYears() {
