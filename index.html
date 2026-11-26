@@ -158,6 +158,13 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
 
   <div class="kpi-row" id="kpiRow"></div>
 
+  <section class="chart-card portfolio-gmv" id="sellerMonthlyGMV" aria-labelledby="sellerGMVTitle">
+    <h2 id="sellerGMVTitle">Selected Seller — Monthly GMV by Year</h2>
+    <p class="portfolio-note" id="sellerGMVNote">Choose any seller above to compare monthly sales across all its available years. Months run from January to December; each colored line represents one year. Missing records are gaps, not zero sales. This chart shows actuals only and is independent of the year and month filters.</p>
+    <div class="portfolio-summary" id="sellerGMVSummary"></div>
+    <div class="portfolio-chart-wrap"><canvas id="gmvChart" role="img" aria-labelledby="sellerGMVTitle" aria-describedby="sellerGMVNote sellerGMVSummary">Monthly actual GMV for the selected seller, with a separate line for each available year.</canvas></div>
+  </section>
+
   <div class="chart-card mom-full">
     <h3 id="trendTitle">Month-over-Month Trend</h3>
     <div class="chart-wrap"><canvas id="momChart"></canvas></div>
@@ -176,15 +183,9 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--
     </div>
   </div>
 
-  <div class="charts-row">
-    <div class="chart-card">
-      <h3>GMV Comparison — All Years</h3>
-      <div class="chart-wrap"><canvas id="gmvChart"></canvas></div>
-    </div>
-    <div class="chart-card">
-      <h3>Orders & Buyers</h3>
-      <div class="chart-wrap"><canvas id="ordersChart"></canvas></div>
-    </div>
+  <div class="chart-card mom-full">
+    <h3>Orders & Buyers — All Years</h3>
+    <div class="chart-wrap"><canvas id="ordersChart"></canvas></div>
   </div>
 </div>
 
@@ -691,36 +692,66 @@ function renderCrossYear() {
   table.innerHTML = html;
 }
 
-function renderAllYearCharts() {
-  const sInfo = SELLERS.find(s => s.code === currentSeller);
-  const years = sInfo.years.map(Number).sort((a,b) => a-b);
-  const yearColors = ['rgba(99,102,241,.7)','rgba(34,197,94,.7)','rgba(245,158,11,.7)','rgba(168,85,247,.7)'];
+// Align each seller's actual records by calendar month, not array position.
+// Keep missing months null and never add portfolio forecasts to seller records.
+function getSellerMonthlyGMV(sellerCode) {
+  return Object.entries(DATA[sellerCode]?.years || {})
+    .filter(([,rows]) => rows.length)
+    .sort(([a],[b]) => Number(a)-Number(b))
+    .map(([year,rows]) => {
+      const byMonth = new Map(rows.map(row => [row.month,row]));
+      const months = MONTHS.flatMap((_,index) => byMonth.has(index+1) ? [index+1] : []);
+      const aligned = metric => MONTHS.map((_,index) => byMonth.get(index+1)?.[metric] ?? null);
+      const consecutive = months.every((month,index) => index===0 || month===months[index-1]+1);
+      const coverage = consecutive && months.length>1
+        ? `${MONTHS[months[0]-1]}–${MONTHS[months[months.length-1]-1]}`
+        : months.map(month => MONTHS[month-1]).join(', ');
+      return {year:Number(year),actual:aligned('gmv'),netOrders:aligned('netOrders'),buyers:aligned('buyers'),
+        months,coverage,actualGMV:rows.reduce((sum,row) => sum+Math.round(row.gmv*100),0)/100};
+    });
+}
 
-  // GMV Comparison
+function renderAllYearCharts() {
+  const monthly = getSellerMonthlyGMV(currentSeller);
+  const years = monthly.map(series => series.year);
+  const yearPalette = {'2024':'#6366f1','2025':'#22c55e','2026':'#f59e0b'};
+  const yearColors = years.map(year => yearPalette[year] || '#a855f7');
+  const sellerName = DATA[currentSeller].name;
+  document.getElementById('sellerGMVTitle').textContent = `${sellerName} — Monthly GMV by Year`;
+  document.getElementById('sellerGMVSummary').innerHTML = monthly.map((series,index) => `
+    <div class="portfolio-total" style="--year-color:${yearColors[index]}">
+      <h3>${series.year}${series.months.length<12 ? '<span class="portfolio-partial">Partial year</span>' : ''}</h3>
+      <div class="portfolio-coverage">Actual GMV · ${series.coverage}</div>
+      <div class="portfolio-amount">${formatPortfolioGMV(series.actualGMV)}</div>
+      <div class="portfolio-coverage">${series.months.length}/12 months with records · No forecasts</div>
+    </div>`).join('');
+
   if (gmvChart) gmvChart.destroy();
   const gmvCtx = document.getElementById('gmvChart').getContext('2d');
-  const gmvDatasets = years.map((yr, i) => {
-    const d = getData(currentSeller, yr);
-    return {
-      label: String(yr),
-      data: d.map(r => r.gmv),
-      borderColor: yearColors[i] || yearColors[0],
-      backgroundColor: (yearColors[i] || yearColors[0]).replace('.7','.1'),
-      fill: false, tension: .3
-    };
-  });
-  // Align labels to max months
-  const maxMonths = Math.max(...years.map(yr => getData(currentSeller, yr).length));
-  const gmvLabels = MONTHS.slice(0, maxMonths);
+  const gmvLabels = MONTHS;
+  const gmvDatasets = monthly.map((series,index) => ({
+    label:String(series.year),data:series.actual,
+    borderColor:yearColors[index],backgroundColor:yearColors[index],
+    borderWidth:2.5,pointRadius:4,pointHoverRadius:7,
+    fill:false,tension:0,spanGaps:false
+  }));
   gmvChart = new Chart(gmvCtx, {
-    type: 'line',
-    data: {labels: gmvLabels, datasets: gmvDatasets},
-    options: {
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:'#8b8fa3'}}},
+    type:'line',
+    data:{labels:gmvLabels,datasets:gmvDatasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{labels:{color:'#8b8fa3',font:{size:12},usePointStyle:true}},
+        tooltip:{callbacks:{
+          title:items => MONTH_FULL[items[0].dataIndex],
+          label:context => `${context.dataset.label} Actual GMV: ${formatPortfolioGMV(context.parsed.y)}`
+        }}
+      },
       scales:{
-        x:{ticks:{color:'#8b8fa3'},grid:{color:'rgba(42,46,63,.5)'}},
-        y:{ticks:{color:'#8b8fa3',callback:v=>'$'+v.toLocaleString()},grid:{color:'rgba(42,46,63,.5)'}}
+        x:{ticks:{color:'#8b8fa3',maxRotation:0,minRotation:0},grid:{color:'rgba(42,46,63,.5)'}},
+        y:{beginAtZero:true,title:{display:true,text:'Monthly GMV ($)',color:'#8b8fa3'},
+          ticks:{color:'#8b8fa3',callback:value => '$'+value.toLocaleString('en-US')},grid:{color:'rgba(42,46,63,.5)'}}
       }
     }
   });
@@ -729,20 +760,19 @@ function renderAllYearCharts() {
   if (ordersChart) ordersChart.destroy();
   const ordCtx = document.getElementById('ordersChart').getContext('2d');
   const ordDatasets = [];
-  years.forEach((yr, i) => {
-    const d = getData(currentSeller, yr);
+  monthly.forEach((series, i) => {
     ordDatasets.push({
-      label: `Orders ${yr}`,
-      data: d.map(r => r.netOrders),
-      borderColor: yearColors[i] || yearColors[0],
-      fill: false, tension: .3
+      label: `Orders ${series.year}`,
+      data: series.netOrders,
+      borderColor: yearColors[i],
+      fill: false, tension: .3, spanGaps:false
     });
     ordDatasets.push({
-      label: `Buyers ${yr}`,
-      data: d.map(r => r.buyers),
-      borderColor: yearColors[i] || yearColors[0],
+      label: `Buyers ${series.year}`,
+      data: series.buyers,
+      borderColor: yearColors[i],
       borderDash: [5,5],
-      fill: false, tension: .3
+      fill: false, tension: .3, spanGaps:false
     });
   });
   ordersChart = new Chart(ordCtx, {
